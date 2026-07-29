@@ -10,3 +10,9 @@
 # The register itself - which exceptions are in force - is the part that
 # actually changes cluster behaviour.
 /kustomization.yaml @nirmata/platform-security
+
+# The intake automation renders PolicyException manifests and registers them, so
+# whoever can change it can change what a request is allowed to ask for - the
+# template that keeps a request scoped to one workload lives there. Same
+# reviewers as the register itself.
+/.github/           @nirmata/platform-security

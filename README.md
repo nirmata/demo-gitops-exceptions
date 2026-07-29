@@ -29,14 +29,61 @@ listed in `kustomization.yaml`:
 ```yaml
 resources:
   - namespace.yaml
-  # - legacy-billing-host-path.yaml       <- not in force
-  - node-exporter-host-access.yaml        #  <- in force
+  # - requests/legacy-billing-host-path.yaml     <- not in force
+  - requests/node-exporter-host-access.yaml      #  <- in force
 ```
 
 That one-line diff is the whole approval. It is what a reviewer looks at, and it
 is what `git log` records.
 
 ## Requesting an exception
+
+### With the form
+
+[**File an exception request**](../../issues/new?template=exception-request.yml).
+It asks for the workload, its namespace, the policies it fails, a ticket, an
+expiry and a justification — then a workflow renders the `PolicyException` and
+opens a pull request carrying it.
+
+You need neither Kyverno knowledge nor write access here. What the form cannot do
+is grant anything: it opens a pull request and stops. `CODEOWNERS` still routes
+the review to the security team, merging is still the approval, and `git log`
+still records who did it.
+
+That is also why the form has no field for a scope expression. `matchConditions`
+are rendered from a fixed template around a validated namespace and workload
+label, so **no request can ask for anything wider than one workload** — there is
+no way to submit `expression: true`, to exempt a whole namespace, or to name a
+policy that does not exist. The reviewer reads a diff whose shape is already
+guaranteed; what is left to judge is whether the exemption is *warranted*, which
+is the part that actually needs a person.
+
+The generated manifest records `requested-by`, not `approved-by`. Filing a
+request is not approving it.
+
+<details>
+<summary>What the automation needs, if you run your own copy</summary>
+
+Two repository settings, neither of which a script can set for you:
+
+- **Settings → General → Features → Issues** — enabled.
+- **Settings → Actions → General → Workflow permissions** — *Allow GitHub Actions
+  to create and approve pull requests*. **Off by default** for repositories owned
+  by a personal account; without it the workflow cannot open the pull request.
+
+Forks are awkward here (Actions need enabling on first visit, and Issues on forks
+are inconsistent). If you are standing up your own register, prefer **Use this
+template** over **Fork**.
+
+Pull requests opened with `GITHUB_TOKEN` do not trigger other workflows, so
+validation checks added later will not run on them without a GitHub App token or
+a draft → ready-for-review step.
+
+</details>
+
+### By hand
+
+The form is a convenience; the repository is the interface.
 
 1. Add a `PolicyException` manifest under `requests/`. Name it for the workload,
    not the policy.

@@ -1,0 +1,154 @@
+# Turn a filled-in exception request into a pull request.
+#
+# This workflow does not grant anything, and deliberately cannot: it opens a pull
+# request and stops. CODEOWNERS still routes the review to the security team, and
+# merging is still the approval. What it removes is the part that never needed a
+# human - writing the YAML.
+#
+# Two repository settings this needs, neither of which a script can set for you:
+#
+#   Settings > General > Features > Issues                        enabled
+#   Settings > Actions > General > Workflow permissions
+#     "Allow GitHub Actions to create and approve pull requests"  enabled
+#
+# The second is off by default on repositories owned by a personal account, and
+# without it the `gh pr create` step fails with a permissions error.
+#
+# Note also that a pull request opened with GITHUB_TOKEN does not trigger other
+# workflows, so any checks added later will not run on these PRs without a
+# GitHub App token or a draft -> ready_for_review dance.
+name: Exception request
+
+on:
+  issues:
+    types: [opened, edited]
+
+# One run per issue; a quick edit should not race its own earlier run.
+concurrency:
+  group: exception-request-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write        # push the branch
+  pull-requests: write   # open the pull request
+  issues: write          # report back on the issue
+
+jobs:
+  render:
+    # The form sets both of these; either is enough to recognise a request.
+    if: >-
+      startsWith(github.event.issue.title, 'Exception request:') ||
+      contains(github.event.issue.labels.*.name, 'exception-request')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render the PolicyException
+        id: render
+        env:
+          # Through the environment, never interpolated into the script: the body
+          # is text a stranger wrote.
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          set -o pipefail
+          if ! .github/scripts/render-exception.sh > "$RUNNER_TEMP/render.out" 2> "$RUNNER_TEMP/render.err"; then
+            {
+              echo "failed=true"
+              echo "message<<EOF"
+              cat "$RUNNER_TEMP/render.err"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat "$RUNNER_TEMP/render.out" >> "$GITHUB_OUTPUT"
+          echo "failed=false" >> "$GITHUB_OUTPUT"
+
+      # A rejected request is worth saying out loud on the issue - silence would
+      # leave the requester waiting on a review that is never coming.
+      - name: Explain a rejected request
+        if: steps.render.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MESSAGE: ${{ steps.render.outputs.message }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          {
+            printf 'This request could not be rendered into a `PolicyException`:\n\n'
+            printf '```\n%s\n```\n\n' "$MESSAGE"
+            printf 'Edit the issue to fix it and this will run again.\n'
+          } > body.md
+          gh issue comment "$ISSUE" --body-file body.md
+          exit 1
+
+      - name: Commit it to a branch
+        id: commit
+        env:
+          NAME: ${{ steps.render.outputs.name }}
+          ISSUE: ${{ github.event.issue.number }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="exception-request-${ISSUE}"
+          git checkout -B "$branch"
+          git add "requests/${NAME}.yaml" kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -q \
+            -m "Grant exception ${NAME}" \
+            -m "Requested by @${AUTHOR} in #${ISSUE}." \
+            -m "Rendered from the exception request form. The scope expression comes from a fixed template - one workload in one namespace - not from the request."
+          git push -q --force-with-lease origin "$branch"
+          {
+            echo "branch=${branch}"
+            echo "unchanged=false"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open (or update) the pull request
+        if: steps.commit.outputs.unchanged != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          NAME: ${{ steps.render.outputs.name }}
+          POLICIES: ${{ steps.render.outputs.policies }}
+          ISSUE: ${{ github.event.issue.number }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+        run: |
+          existing=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          {
+            printf '## Exception request\n\n'
+            printf 'Rendered from #%s, requested by @%s.\n\n' "$ISSUE" "$AUTHOR"
+            printf '**Exemption:** `%s`\n' "$NAME"
+            printf '**Policies:** `%s`\n\n' "$POLICIES"
+            printf 'The scope expression was rendered from a fixed template - one workload '
+            printf 'in one namespace. The form cannot ask for anything wider, so the diff '
+            printf 'below is the whole of what this grants.\n\n'
+            printf 'Merging this puts the exemption in force: it adds the manifest **and** '
+            printf 'registers it in `kustomization.yaml`. Argo CD applies it within a few '
+            printf 'minutes. Closing this without merging changes nothing.\n\n'
+            printf 'Nobody has approved anything yet - that is what your review is.\n\n'
+            printf -- '---\n\n'
+            cat .github/pull_request_template.md
+          } > pr-body.md
+
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body-file pr-body.md
+            echo "updated PR #${existing}"
+            url=$(gh pr view "$existing" --json url --jq .url)
+          else
+            url=$(gh pr create \
+              --head "$BRANCH" \
+              --title "Grant exception ${NAME} (#${ISSUE})" \
+              --body-file pr-body.md)
+          fi
+          {
+            printf 'Rendered as a pull request for the security team to review: %s\n\n' "$url"
+            printf 'Nothing has changed in any cluster yet, and nothing will until that '
+            printf 'pull request is merged.\n'
+          } > comment.md
+          gh issue comment "$ISSUE" --body-file comment.md

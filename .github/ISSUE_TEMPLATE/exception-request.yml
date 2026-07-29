@@ -1,0 +1,113 @@
+name: Policy exception request
+description: Ask for one workload to be exempted from specific Pod Security policies
+title: "Exception request: "
+labels: ["exception-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form does not grant anything. It opens a **pull request** carrying the
+        `PolicyException` manifest your answers describe, for the security team to
+        review. Nothing changes in any cluster until that pull request is merged.
+
+        You do not need to know Kyverno, or CEL, or have write access to this
+        repository. What you do need is a reason — the workload stays exempt until
+        someone can explain why it no longer needs to be.
+
+  - type: input
+    id: workload
+    attributes:
+      label: Workload
+      description: >-
+        The value of the workload's `app` label — the exemption will apply to this
+        and nothing else. Not the Deployment name, if they differ.
+      placeholder: legacy-billing
+    validations:
+      required: true
+
+  - type: input
+    id: namespace
+    attributes:
+      label: Namespace
+      description: The namespace the workload runs in.
+      placeholder: legacy
+    validations:
+      required: true
+
+  - type: dropdown
+    id: policies
+    attributes:
+      label: Policies it cannot satisfy
+      description: >-
+        Only the ones it genuinely fails — check the PolicyReport rather than
+        guessing. `kubectl -n <namespace> get policyreports -o yaml` lists them.
+        Every policy you add here is a control this workload stops being held to.
+      multiple: true
+      options:
+        - disallow-capabilities
+        - disallow-capabilities-strict
+        - disallow-host-namespaces
+        - disallow-host-path
+        - disallow-host-ports
+        - disallow-host-process
+        - disallow-privilege-escalation
+        - disallow-privileged-containers
+        - disallow-proc-mount
+        - disallow-selinux
+        - require-run-as-non-root-user
+        - require-run-as-nonroot
+        - restrict-apparmor-profiles
+        - restrict-seccomp
+        - restrict-seccomp-strict
+        - restrict-sysctls
+        - restrict-volume-types
+    validations:
+      required: true
+
+  - type: input
+    id: ticket
+    attributes:
+      label: Ticket
+      description: The change or compliance ticket this deviation is tracked under.
+      placeholder: COMPLIANCE-1421
+    validations:
+      required: true
+
+  - type: input
+    id: expires
+    attributes:
+      label: Expires
+      description: >-
+        `YYYY-MM-DD`. Leave blank only if the need is structural rather than
+        temporary — a node agent needing host namespaces, say — and say so in the
+        justification. An exception with no end date is one nobody will revisit.
+      placeholder: "2026-12-31"
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Justification
+      description: >-
+        What does the workload do that the policy forbids, why can it not be fixed
+        instead, and what would have to change for this exemption to be withdrawn?
+        Write it for a stranger auditing this in six months.
+      placeholder: >-
+        legacy-billing writes settlement files to a host directory that is
+        replicated off-cluster by an agent we do not own. Scheduled for
+        replacement by an object-store writer in FY27 Q1.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before you file this
+      options:
+        - label: >-
+            Fixing the workload was considered first, and the justification says
+            why it is not the answer here.
+          required: true
+        - label: >-
+            I understand this exempts one workload from the policies listed above,
+            and that the exemption is visible in the register with my name on it.
+          required: true
