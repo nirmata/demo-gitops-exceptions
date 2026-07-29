@@ -1,0 +1,112 @@
+# Policy Exception Register
+
+The authoritative list of Kyverno policy exemptions for the demo fleet.
+
+This repository exists so that **granting an exemption is a pull request** —
+reviewed by the security team, attributable to a person, tied to a ticket, and
+revocable with `git revert`. It is deliberately separate from the platform
+repository ([nirmata/demo-gitops](https://github.com/nirmata/demo-gitops)),
+because the people who approve an exemption from a security control are not
+necessarily the people who approve a change to cluster configuration.
+
+Argo CD syncs this repository into the `policy-exceptions` namespace of every
+workload cluster. Kyverno is configured with
+`--exceptionNamespace=policy-exceptions`, so a `PolicyException` is only honoured
+if it lives there — and that namespace is owned by Argo CD with `prune` and
+`selfHeal` enabled. There is no `kubectl apply` path to an exemption.
+
+## How it works
+
+```
+requests/                  every exception anyone has written, granted or not
+kustomization.yaml         the ones that are actually in force
+namespace.yaml             the policy-exceptions namespace itself
+```
+
+A manifest sitting in `requests/` does nothing. It takes effect only when it is
+listed in `kustomization.yaml`:
+
+```yaml
+resources:
+  - namespace.yaml
+  # - legacy-billing-host-path.yaml       <- not in force
+  - node-exporter-host-access.yaml        #  <- in force
+```
+
+That one-line diff is the whole approval. It is what a reviewer looks at, and it
+is what `git log` records.
+
+## Requesting an exception
+
+1. Add a `PolicyException` manifest under `requests/`. Name it for the workload,
+   not the policy.
+2. Scope it to the narrowest thing that works — a single workload, via
+   `matchConditions`. Never a whole namespace, never a whole policy.
+3. List only the policies the workload genuinely cannot satisfy in `policyRefs`.
+4. Fill in the annotations: ticket, approver, expiry, and a justification a
+   stranger can evaluate six months from now.
+5. Open a pull request that also uncomments the file in `kustomization.yaml`.
+
+`CODEOWNERS` routes review to the security team.
+
+### Anatomy of a good exception
+
+```yaml
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: legacy-billing-host-path
+  namespace: policy-exceptions
+  annotations:
+    demo.nirmata.io/ticket: COMPLIANCE-1421
+    demo.nirmata.io/approved-by: platform-security
+    demo.nirmata.io/expires: "2026-12-31"
+    demo.nirmata.io/justification: >-
+      Why this cannot be fixed instead, and when it will be.
+spec:
+  policyRefs:                     # exactly the policies it cannot satisfy
+    - kind: ValidatingPolicy
+      name: disallow-host-path
+  matchConditions:                # exactly one workload
+    - name: legacy-billing-only
+      expression: >-
+        object.metadata.namespace == 'legacy' &&
+        'app' in object.metadata.labels &&
+        object.metadata.labels['app'] == 'legacy-billing'
+```
+
+## Auditing what is in force
+
+An exception does not hide a violation, it accounts for it. Kyverno reports the
+result as `skip` rather than `fail`, and names the exception that allowed it:
+
+```sh
+kubectl -n legacy get policyreports.wgpolicyk8s.io -o yaml | grep -A4 'result: skip'
+```
+
+```yaml
+- result: skip
+  policy: disallow-host-path
+  properties:
+    exceptions: legacy-billing-host-path
+```
+
+To see everything currently in force:
+
+```sh
+kubectl get policyexceptions.policies.kyverno.io -A
+```
+
+> Spell out the group. The short name `polex` resolves to the *legacy*
+> `kyverno.io` PolicyException CRD, which this register never uses, so it reports
+> `No resources found` even when exemptions are active.
+
+## Revoking
+
+Comment the file out of `kustomization.yaml`, or `git revert` the commit that
+granted it. Argo CD prunes the `PolicyException`, and the workload is held to the
+full policy set again at its next admission.
+
+---
+
+Part of the [nirmata/demo-gitops](https://github.com/nirmata/demo-gitops) demo.

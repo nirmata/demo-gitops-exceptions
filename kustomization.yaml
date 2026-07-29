@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The exceptions that are actually in force.
+#
+# A manifest under requests/ does nothing until it is listed here. Uncommenting
+# a line is the approval; that one-line diff is what a reviewer reads and what
+# `git log` records. Argo CD prunes anything removed from this list.
+resources:
+  - namespace.yaml
+
+  # --- Granted --------------------------------------------------------------
+  # - requests/legacy-billing-host-path.yaml
+  # - requests/node-exporter-host-access.yaml

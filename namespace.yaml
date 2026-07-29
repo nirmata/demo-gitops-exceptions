@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: policy-exceptions
+  labels:
+    demo.nirmata.io/component: policy-exceptions
+  annotations:
+    # Kyverno only reads PolicyExceptions from this namespace
+    # (`features.policyExceptions.namespace` in the Kyverno Helm values).
+    demo.nirmata.io/description: >-
+      The single namespace Kyverno trusts for PolicyExceptions. Managed
+      exclusively by Argo CD from nirmata/demo-gitops-exceptions.

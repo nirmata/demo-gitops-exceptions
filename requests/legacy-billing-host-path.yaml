@@ -1,0 +1,30 @@
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: legacy-billing-host-path
+  namespace: policy-exceptions
+  annotations:
+    demo.nirmata.io/ticket: COMPLIANCE-1421
+    demo.nirmata.io/approved-by: platform-security
+    demo.nirmata.io/expires: "2026-12-31"
+    demo.nirmata.io/justification: >-
+      legacy-billing writes settlement files to a host directory that is
+      replicated off-cluster by an agent we do not own. Scheduled for
+      replacement by an object-store writer in FY27 Q1.
+spec:
+  # Exactly the two policies this workload cannot satisfy today. Everything
+  # else in the Pod Security Standards set still applies to it.
+  policyRefs:
+    - kind: ValidatingPolicy
+      name: disallow-host-path
+    - kind: ValidatingPolicy
+      name: restrict-volume-types
+
+  # And exactly one workload, not the whole namespace.
+  matchConditions:
+    - name: legacy-billing-only
+      expression: >-
+        object.metadata.namespace == 'legacy' &&
+        has(object.metadata.labels) &&
+        'app' in object.metadata.labels &&
+        object.metadata.labels['app'] == 'legacy-billing'

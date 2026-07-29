@@ -1,0 +1,12 @@
+# Every exemption from a security control is reviewed by the security team.
+#
+# This is the point of keeping the exception register in its own repository:
+# approving a deviation from the Pod Security Standards is a different decision,
+# made by different people, than approving a change to cluster configuration.
+#
+# Replace with a real team before using this outside the demo.
+*                   @nirmata/platform-security
+
+# The register itself - which exceptions are in force - is the part that
+# actually changes cluster behaviour.
+/kustomization.yaml @nirmata/platform-security
