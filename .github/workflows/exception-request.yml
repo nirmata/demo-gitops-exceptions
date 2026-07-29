@@ -116,6 +116,7 @@ jobs:
           BRANCH: ${{ steps.commit.outputs.branch }}
           NAME: ${{ steps.render.outputs.name }}
           POLICIES: ${{ steps.render.outputs.policies }}
+          NOTES: ${{ steps.render.outputs.notes }}
           ISSUE: ${{ github.event.issue.number }}
           AUTHOR: ${{ github.event.issue.user.login }}
         run: |
@@ -125,6 +126,11 @@ jobs:
             printf 'Rendered from #%s, requested by @%s.\n\n' "$ISSUE" "$AUTHOR"
             printf '**Exemption:** `%s`\n' "$NAME"
             printf '**Policies:** `%s`\n\n' "$POLICIES"
+            # Not worth refusing a request over, but worth a reviewer's attention.
+            # Rendering went ahead; judging these is the human's job.
+            if [ -n "${NOTES:-}" ]; then
+              printf '> **Worth a look before merging:** %s.\n\n' "$NOTES"
+            fi
             printf 'The scope expression was rendered from a fixed template - one workload '
             printf 'in one namespace. The form cannot ask for anything wider, so the diff '
             printf 'below is the whole of what this grants.\n\n'

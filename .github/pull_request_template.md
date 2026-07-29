@@ -1,7 +1,6 @@
 ## Exception request
 
 **Workload:** <!-- namespace/name, e.g. legacy/legacy-billing -->
-**Ticket:** <!-- COMPLIANCE-nnnn -->
 **Expires:** <!-- YYYY-MM-DD; exceptions without an end date never get removed -->
 
 ### Which policies cannot be satisfied, and why

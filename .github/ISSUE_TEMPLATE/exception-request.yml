@@ -74,15 +74,6 @@ body:
     validations:
       required: true
 
-  - type: input
-    id: ticket
-    attributes:
-      label: Ticket
-      description: The change or compliance ticket this deviation is tracked under.
-      placeholder: COMPLIANCE-1421
-    validations:
-      required: true
-
   - type: dropdown
     id: expires_in
     attributes:

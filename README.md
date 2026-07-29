@@ -3,8 +3,8 @@
 The authoritative list of Kyverno policy exemptions for the demo fleet.
 
 This repository exists so that **granting an exemption is a pull request** —
-reviewed by the security team, attributable to a person, tied to a ticket, and
-revocable with `git revert`. It is deliberately separate from the platform
+reviewed by the security team, attributable to a person, dated, and revocable
+with `git revert`. It is deliberately separate from the platform
 repository ([nirmata/demo-gitops](https://github.com/nirmata/demo-gitops)),
 because the people who approve an exemption from a security control are not
 necessarily the people who approve a change to cluster configuration.
@@ -41,8 +41,8 @@ is what `git log` records.
 ### With the form
 
 [**File an exception request**](../../issues/new?template=exception-request.yml).
-It asks for the workload, its namespace, the policies it fails, a ticket, an
-expiry and a justification — then a workflow renders the `PolicyException` and
+It asks for the workload, its namespace, the policies it fails, how long it is
+needed for and a justification — then a workflow renders the `PolicyException` and
 opens a pull request carrying it.
 
 You need neither Kyverno knowledge nor write access here. What the form cannot do
@@ -123,8 +123,8 @@ The form is a convenience; the repository is the interface.
 2. Scope it to the narrowest thing that works — a single workload, via
    `matchConditions`. Never a whole namespace, never a whole policy.
 3. List only the policies the workload genuinely cannot satisfy in `policyRefs`.
-4. Fill in the annotations: ticket, approver, expiry, and a justification a
-   stranger can evaluate six months from now.
+4. Fill in the annotations: an expiry, and a justification a stranger can
+   evaluate six months from now.
 5. Open a pull request that also uncomments the file in `kustomization.yaml`.
 
 `CODEOWNERS` routes review to the security team.
@@ -138,7 +138,6 @@ metadata:
   name: legacy-billing-host-path
   namespace: policy-exceptions
   annotations:
-    demo.nirmata.io/ticket: COMPLIANCE-1421
     demo.nirmata.io/approved-by: platform-security
     demo.nirmata.io/expires: "2026-12-31"
     demo.nirmata.io/justification: >-
