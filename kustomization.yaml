@@ -10,5 +10,5 @@ resources:
   - namespace.yaml
 
   # --- Granted --------------------------------------------------------------
-  # - requests/legacy-billing-host-path.yaml
+  - requests/legacy-billing-host-path.yaml
   # - requests/node-exporter-host-access.yaml
