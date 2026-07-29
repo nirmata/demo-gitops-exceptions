@@ -90,9 +90,39 @@ A date cannot be restarted.
 > So the cleanup controller is deliberately **not** granted that permission, and
 > the label is here as a machine-readable deadline rather than as the enforcement.
 > Under GitOps expiry has to act on the register: the exemption leaves the cluster
-> when it leaves `kustomization.yaml`. Automating that — a scheduled job that
-> opens a revocation pull request once the date has passed — keeps expiry the same
-> kind of event as everything else here, a reviewable commit.
+> when it leaves `kustomization.yaml`. That is what the expiry workflow below
+> does.
+
+## When an exemption expires
+
+`.github/workflows/exception-expiry.yml` runs daily and turns an elapsed date into
+a **revocation pull request** — commenting the exemption out of
+`kustomization.yaml`, which is what actually takes it out of the cluster. Argo CD
+prunes the `PolicyException` on merge and the workload is held to the full policy
+set again.
+
+- **One pull request per expired exemption.** Renewing one and revoking another
+  are different decisions and should not arrive welded together.
+- **Nothing merges itself.** A workload may still need its exemption; the pull
+  request is where that argument happens.
+- **A week's notice.** Anything expiring within seven days gets a comment on its
+  original request issue, so a renewal can be deliberate rather than a surprise.
+- **Renewal is a fresh request**, not an edited date — so it carries its own
+  justification instead of inheriting an expired one.
+- The manifest stays in `requests/` either way. A withdrawn exemption is part of
+  the record, and the next person to ask the same question deserves to find the
+  previous answer.
+- Only exemptions **in force** are chased. A manifest sitting unlisted in
+  `requests/` is already harmless however old its date is.
+- No `expires` at all is treated as a decision rather than an oversight —
+  `node-exporter`'s need for host namespaces is structural — so it is left alone.
+
+To see it work without waiting for a date, run the workflow manually with an
+`as_of` date:
+
+```sh
+gh workflow run "Exception expiry" -f as_of=2027-01-01
+```
 
 <details>
 <summary>What the automation needs, if you run your own copy</summary>
