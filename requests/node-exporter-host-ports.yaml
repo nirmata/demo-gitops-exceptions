@@ -1,0 +1,27 @@
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: node-exporter-host-ports
+  namespace: policy-exceptions
+  annotations:
+    demo.nirmata.io/requested-by: JimBugwadia
+    demo.nirmata.io/request: https://github.com/nirmata/demo-gitops-exceptions/issues/8
+    demo.nirmata.io/expires: "2026-09-12"
+    demo.nirmata.io/justification: "node-exporter publishes metrics on host port 9100 so the Prometheus scrape works without a Service per node. Retest after the agent moves to a sidecar model."
+  labels:
+    cleanup.kyverno.io/ttl: "2026-09-12"
+spec:
+  # Only the policies the request named.
+  policyRefs:
+    - kind: ValidatingPolicy
+      name: disallow-host-ports
+
+  # Rendered from a fixed template - one workload in one namespace. The
+  # request form cannot express anything wider than this.
+  matchConditions:
+    - name: node-exporter-only
+      expression: >-
+        object.metadata.namespace == 'monitoring' &&
+        has(object.metadata.labels) &&
+        'app' in object.metadata.labels &&
+        object.metadata.labels['app'] == 'node-exporter'

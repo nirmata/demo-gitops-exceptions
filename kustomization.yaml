@@ -12,3 +12,4 @@ resources:
   # --- Granted --------------------------------------------------------------
   # - requests/legacy-billing-host-path.yaml
   # - requests/node-exporter-host-access.yaml
+  - requests/node-exporter-host-ports.yaml
