@@ -61,6 +61,39 @@ is the part that actually needs a person.
 The generated manifest records `requested-by`, not `approved-by`. Filing a
 request is not approving it.
 
+The form asks **how long** you need it for rather than for a date — a question a
+requester can actually answer. The renderer turns it into an absolute date,
+carried two ways:
+
+```yaml
+metadata:
+  labels:
+    cleanup.kyverno.io/ttl: "2026-10-27"     # Kyverno's own expiry label
+  annotations:
+    demo.nirmata.io/expires: "2026-10-27"    # what the register lists
+```
+
+Absolute rather than a `90d` duration on purpose: Kyverno counts a relative TTL
+from when it *observed* the label, so anything that recreates the object — a
+resync, a cluster rebuild, Argo CD self-healing it — silently restarts the clock.
+A date cannot be restarted.
+
+> **What the TTL label does and does not do here.** Kyverno's cleanup controller
+> deletes a resource whose TTL has elapsed, and it does work: given `delete`
+> permission on `policyexceptions` it removed one on schedule in this demo. But
+> Argo CD owns this namespace with `selfHeal: true` and recreates the exemption
+> within seconds — measured at a delete-and-recreate every two minutes,
+> indefinitely, while the Application still reported `Synced/Healthy`. In-cluster
+> expiry cannot win against a GitOps controller whose source of truth still lists
+> the exception.
+>
+> So the cleanup controller is deliberately **not** granted that permission, and
+> the label is here as a machine-readable deadline rather than as the enforcement.
+> Under GitOps expiry has to act on the register: the exemption leaves the cluster
+> when it leaves `kustomization.yaml`. Automating that — a scheduled job that
+> opens a revocation pull request once the date has passed — keeps expiry the same
+> kind of event as everything else here, a reviewable commit.
+
 <details>
 <summary>What the automation needs, if you run your own copy</summary>
 

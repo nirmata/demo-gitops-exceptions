@@ -97,7 +97,7 @@ workload=$(field "Workload")
 namespace=$(field "Namespace")
 policies_raw=$(field "Policies it cannot satisfy")
 ticket=$(field "Ticket")
-expires=$(field "Expires")
+expires_in=$(field "Expires in")
 justification=$(field "Justification")
 
 [ -n "$workload" ]      || die "no workload in the request"
@@ -114,12 +114,31 @@ valid_label "$namespace" ||
 printf '%s' "$ticket" | grep -qE '^[A-Z][A-Z0-9]*-[0-9]+$' ||
   die "ticket '${ticket}' does not look like a ticket reference (e.g. COMPLIANCE-1421)"
 
-if [ -n "$expires" ] && [ "$expires" != "none" ]; then
-  printf '%s' "$expires" | grep -qE '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' ||
-    die "expires '${expires}' is not a YYYY-MM-DD date"
-else
-  expires=""
-fi
+# The form asks for a duration, because "how long do you need this for?" is a
+# question a requester can answer, while "what date should this stop working?"
+# invites a year from now. The manifest still carries an absolute date - a
+# duration would be ambiguous the moment anyone read it later, and status.sh and
+# grant-exception.sh --list both expect a date.
+expires=""
+case "$expires_in" in
+  "")            die "no duration in the request - how long do you need the exemption for?" ;;
+  Never*|never*) expires="" ;;                       # structural; justification carries the why
+  *)
+    days=$(printf '%s' "$expires_in" | sed -n 's/^\([0-9]\{1,4\}\)[[:space:]]*days\{0,1\}$/\1/p')
+    [ -n "$days" ] ||
+      die "could not read a duration from '${expires_in}' - expected something like '90 days'"
+    # The form offers a fixed set; anything else means the form and this script
+    # have drifted apart, which is worth failing loudly rather than guessing.
+    case "$days" in
+      30|60|90|180|365) ;;
+      *) die "'${days} days' is not one of the offered durations (30, 60, 90, 180, 365)" ;;
+    esac
+    # GNU date on the runner, BSD date when this is run on a Mac.
+    expires=$(date -u -d "+${days} days" +%Y-%m-%d 2>/dev/null ||
+              date -u -v"+${days}d" +%Y-%m-%d) ||
+      die "could not compute the expiry date"
+    ;;
+esac
 
 # The dropdown arrives comma separated. Validate every entry against the set the
 # policy set actually ships, and sort them so the manifest reads the same however
@@ -176,6 +195,20 @@ mkdir -p "$REQ_DIR"
   [ -z "$ISSUE_URL" ] || printf '    demo.nirmata.io/request: %s\n' "$ISSUE_URL"
   [ -z "$expires" ]   || printf '    demo.nirmata.io/expires: "%s"\n' "$expires"
   printf '    demo.nirmata.io/justification: "%s"\n' "$justification"
+  # Kyverno's own expiry mechanism, so the date is not merely documentation:
+  # the cleanup controller deletes a resource carrying cleanup.kyverno.io/ttl
+  # once it elapses.
+  #
+  # An absolute date rather than a duration on purpose. A relative `90d` is
+  # counted from when the label was *observed*, so anything that recreates the
+  # object - Argo CD self-healing it, a cluster rebuild, a resync - starts the
+  # ninety days over, and the exemption quietly outlives its own deadline.
+  # A date cannot be restarted. Colons are not valid in a label value, which is
+  # why this is the date form and not a full timestamp.
+  if [ -n "$expires" ]; then
+    printf '  labels:\n'
+    printf '    cleanup.kyverno.io/ttl: "%s"\n' "$expires"
+  fi
   printf 'spec:\n'
   printf '  # Only the policies the request named.\n'
   printf '  policyRefs:\n'
