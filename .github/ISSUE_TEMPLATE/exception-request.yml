@@ -14,23 +14,33 @@ body:
         repository. What you do need is a reason — the workload stays exempt until
         someone can explain why it no longer needs to be.
 
-  - type: input
+  - type: dropdown
     id: workload
     attributes:
       label: Workload
       description: >-
-        The value of the workload's `app` label — the exemption will apply to this
-        and nothing else. Not the Deployment name, if they differ.
-      placeholder: legacy-billing
+        The workload's `app` label — the exemption applies to this and nothing
+        else. These are the fleet's known workloads. If yours is not listed, follow
+        "By hand" in the README rather than picking the closest match.
+      options:
+        - legacy-billing
+        - node-exporter
+        - storefront
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: namespace
     attributes:
       label: Namespace
-      description: The namespace the workload runs in.
-      placeholder: legacy
+      description: >-
+        Where it runs. Workload and namespace are matched together, so a pair that
+        does not exist produces an exemption matching nothing — harmless, but it
+        will not do what you wanted. Check before you file.
+      options:
+        - legacy
+        - monitoring
+        - web
     validations:
       required: true
 
@@ -73,15 +83,25 @@ body:
     validations:
       required: true
 
-  - type: input
-    id: expires
+  - type: dropdown
+    id: expires_in
     attributes:
-      label: Expires
+      label: Expires in
       description: >-
-        `YYYY-MM-DD`. Leave blank only if the need is structural rather than
-        temporary — a node agent needing host namespaces, say — and say so in the
-        justification. An exception with no end date is one nobody will revisit.
-      placeholder: "2026-12-31"
+        How long you need it for. This becomes a date in the manifest, counted from
+        the day the request is filed — so "90 days" is a commitment to have dealt
+        with it by then, not a rolling window that renews itself. Pick the shortest
+        one that is honest.
+      default: 2
+      options:
+        - 30 days
+        - 60 days
+        - 90 days
+        - 180 days
+        - 365 days
+        - Never — the need is structural
+    validations:
+      required: true
 
   - type: textarea
     id: justification
