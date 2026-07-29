@@ -4,7 +4,6 @@ metadata:
   name: node-exporter-host-access
   namespace: policy-exceptions
   annotations:
-    demo.nirmata.io/ticket: COMPLIANCE-0907
     demo.nirmata.io/approved-by: platform-security
     demo.nirmata.io/justification: >-
       node-exporter is a node-level agent: reading host metrics requires the

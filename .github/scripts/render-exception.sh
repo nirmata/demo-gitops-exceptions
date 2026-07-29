@@ -15,6 +15,7 @@
 # Writes requests/<name>.yaml, adds it to kustomization.yaml, and prints
 #   name=<name>
 #   policies=<comma separated>
+#   notes=<anything the reviewer should know, semicolon separated>
 # on stdout for the workflow to pick up. Exits non-zero with a message on stderr
 # if the request is not something we are willing to render.
 #
@@ -96,47 +97,73 @@ valid_label() {
 workload=$(field "Workload")
 namespace=$(field "Namespace")
 policies_raw=$(field "Policies it cannot satisfy")
-ticket=$(field "Ticket")
 expires_in=$(field "Expires in")
 justification=$(field "Justification")
 
-[ -n "$workload" ]      || die "no workload in the request"
-[ -n "$namespace" ]     || die "no namespace in the request"
-[ -n "$policies_raw" ]  || die "no policies in the request"
-[ -n "$ticket" ]        || die "no ticket in the request"
-[ -n "$justification" ] || die "no justification in the request - that is the part a reviewer reads"
+# --- What is worth refusing, and what is worth only noting --------------------
+#
+# Two classes of problem, treated differently on purpose.
+#
+# A malformed namespace, workload or policy name changes *what gets granted*, so
+# those still stop the render: they go into the scope expression or the policyRefs,
+# and a wrong one either widens the exemption or silently exempts nothing.
+#
+# Everything else is request quality - a vague justification, an odd duration.
+# Those are for the reviewer to push back on, not for a workflow to block, and
+# blocking them dead-ends a demo on the least interesting thing on the screen. They
+# are rendered anyway and listed on the pull request for the reviewer to see.
+NOTES=""
+note() { NOTES="${NOTES}${NOTES:+; }$1"; }
+
+[ -n "$workload" ]     || die "no workload in the request"
+[ -n "$namespace" ]    || die "no namespace in the request"
+[ -n "$policies_raw" ] || die "no policies in the request"
 
 valid_label "$workload" ||
   die "workload '${workload}' is not a valid label value (lowercase letters, digits and dashes)"
 valid_label "$namespace" ||
   die "namespace '${namespace}' is not a valid namespace name (lowercase letters, digits and dashes)"
 
-printf '%s' "$ticket" | grep -qE '^[A-Z][A-Z0-9]*-[0-9]+$' ||
-  die "ticket '${ticket}' does not look like a ticket reference (e.g. COMPLIANCE-1421)"
+if [ -z "$justification" ]; then
+  justification="No justification was given."
+  note "no justification was given"
+fi
 
 # The form asks for a duration, because "how long do you need this for?" is a
 # question a requester can answer, while "what date should this stop working?"
 # invites a year from now. The manifest still carries an absolute date - a
 # duration would be ambiguous the moment anyone read it later, and status.sh and
 # grant-exception.sh --list both expect a date.
+#
+# Anything that looks like a number of days is accepted: `90`, `90d`, `90 days`.
+# The form offers a fixed set, but a hand-edited issue is not a reason to refuse.
 expires=""
 case "$expires_in" in
-  "")            die "no duration in the request - how long do you need the exemption for?" ;;
-  Never*|never*) expires="" ;;                       # structural; justification carries the why
+  ""|Never*|never*|None*|none*)
+    [ -n "$expires_in" ] || note "no duration was given, so this has no expiry date"
+    ;;
   *)
-    days=$(printf '%s' "$expires_in" | sed -n 's/^\([0-9]\{1,4\}\)[[:space:]]*days\{0,1\}$/\1/p')
-    [ -n "$days" ] ||
-      die "could not read a duration from '${expires_in}' - expected something like '90 days'"
-    # The form offers a fixed set; anything else means the form and this script
-    # have drifted apart, which is worth failing loudly rather than guessing.
+    # Strip spaces and any trailing unit, then require what is left to be digits.
+    # Done this way rather than with one regex because BRE alternation (`\|`) is a
+    # GNU extension: it works on the runner and silently does not on a Mac, which
+    # is where this gets tested.
+    days=$(printf '%s' "$expires_in" | tr -d '[:space:]' |
+      sed -e 's/days$//' -e 's/day$//' -e 's/d$//')
     case "$days" in
-      30|60|90|180|365) ;;
-      *) die "'${days} days' is not one of the offered durations (30, 60, 90, 180, 365)" ;;
+      ''|*[!0-9]*) days="" ;;
     esac
-    # GNU date on the runner, BSD date when this is run on a Mac.
-    expires=$(date -u -d "+${days} days" +%Y-%m-%d 2>/dev/null ||
-              date -u -v"+${days}d" +%Y-%m-%d) ||
-      die "could not compute the expiry date"
+    if [ -z "$days" ] || [ "$days" = "0" ]; then
+      note "could not read a duration from '${expires_in}', so this has no expiry date"
+      days=""
+    elif [ "$days" -gt 3650 ]; then
+      note "'${expires_in}' is longer than ten years - rendered as given, but that is not an expiry"
+    fi
+    if [ -n "$days" ]; then
+      # GNU date on the runner, BSD date when this is run on a Mac.
+      expires=$(date -u -d "+${days} days" +%Y-%m-%d 2>/dev/null ||
+                date -u -v"+${days}d" +%Y-%m-%d) ||
+        { note "could not compute an expiry date from '${expires_in}'"; expires=""; }
+    fi
     ;;
 esac
 
@@ -148,7 +175,8 @@ selected=$(printf '%s' "$policies_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//; s
 [ -n "$selected" ] || die "no policies in the request"
 while IFS= read -r p; do
   printf '%s\n' "$POLICIES" | grep -qx "$p" ||
-    die "'${p}' is not a policy in the Pod Security Standards set"
+    die "'${p}' is not a policy in the Pod Security Standards set. One of:
+$(printf '%s' "$POLICIES" | sed '/^$/d; s/^/  /')"
 done <<EOF
 $selected
 EOF
@@ -188,7 +216,6 @@ mkdir -p "$REQ_DIR"
   printf '  name: %s\n' "$name"
   printf '  namespace: policy-exceptions\n'
   printf '  annotations:\n'
-  printf '    demo.nirmata.io/ticket: %s\n' "$ticket"
   # Not `approved-by`: whoever filed the request did not approve it. The approval
   # is the merge of the pull request this becomes, and Git records who did that.
   printf '    demo.nirmata.io/requested-by: %s\n' "$ISSUE_AUTHOR"
@@ -250,3 +277,5 @@ fi
 
 printf 'name=%s\n' "$name"
 printf 'policies=%s\n' "$(printf '%s' "$selected" | tr '\n' ',' | sed 's/,$//')"
+# Anything the reviewer should know that was not worth refusing over.
+printf 'notes=%s\n' "$NOTES"

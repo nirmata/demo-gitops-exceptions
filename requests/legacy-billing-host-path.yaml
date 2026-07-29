@@ -9,7 +9,6 @@ metadata:
     # cleanup controller deletes, so expiry has to act on this register.
     cleanup.kyverno.io/ttl: "2026-12-31"
   annotations:
-    demo.nirmata.io/ticket: COMPLIANCE-1421
     demo.nirmata.io/approved-by: platform-security
     demo.nirmata.io/expires: "2026-12-31"
     demo.nirmata.io/justification: >-
