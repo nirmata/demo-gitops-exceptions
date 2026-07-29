@@ -1,0 +1,167 @@
+# Turn an elapsed expiry date into a revocation pull request.
+#
+# Closes the gap described in issue #5: until now the expiry date was
+# documentation. Kyverno's TTL label cannot enforce it - the cleanup controller
+# deletes the PolicyException and Argo CD, which owns that namespace with
+# selfHeal, recreates it within seconds. Measured at a delete-and-recreate every
+# two minutes while the Application still reported Synced/Healthy.
+#
+# So expiry acts on the register instead. An exemption leaves the cluster when it
+# leaves kustomization.yaml, and this opens the pull request that takes it out -
+# which keeps expiry the same kind of event as every other decision here: a
+# reviewable commit, routed by CODEOWNERS, recorded in `git log`.
+#
+# One pull request per expired exception, on purpose. Renewing one and revoking
+# another are different decisions and should not arrive welded together.
+#
+# Nothing is merged automatically. A workload may genuinely still need its
+# exemption, and the pull request is where that argument happens.
+name: Exception expiry
+
+on:
+  schedule:
+    # 07:23 UTC daily. Off the hour because everything else in the world runs at
+    # :00 and the queue is shorter here.
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+    inputs:
+      as_of:
+        description: 'Pretend today is this date (YYYY-MM-DD) - for demoing without waiting'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: exception-expiry
+  cancel-in-progress: false
+
+jobs:
+  expiry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find what has expired
+        id: find
+        env:
+          TODAY: ${{ inputs.as_of }}
+        run: |
+          .github/scripts/find-expiring.sh > findings.tsv
+          expired=$(grep -c '^expired' findings.tsv || true)
+          soon=$(grep -c '^soon' findings.tsv || true)
+          {
+            echo "expired=${expired}"
+            echo "soon=${soon}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Exception expiry"
+            echo
+            if [ "$expired" = "0" ] && [ "$soon" = "0" ]; then
+              echo "Nothing expired, nothing expiring within a week."
+            else
+              echo '```'
+              cat findings.tsv
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open a revocation pull request for each expired exception
+        if: steps.find.outputs.expired != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AS_OF: ${{ inputs.as_of }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          base=$(git rev-parse --abbrev-ref HEAD)
+
+          grep '^expired' findings.tsv | while IFS=$'\t' read -r _ name expires overdue request; do
+            branch="revoke-expired-${name}"
+
+            # Idempotent: a revocation already up for review is not worth a second one.
+            if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')" ]; then
+              echo "already open for ${name}, leaving it"
+              continue
+            fi
+
+            git checkout -q "$base"
+            git checkout -q -B "$branch"
+            .github/scripts/revoke-exception.sh "$name"
+            git add kustomization.yaml
+            git commit -q \
+              -m "Revoke expired exception ${name}" \
+              -m "Its expiry date was ${expires}, ${overdue} day(s) ago. Opened automatically; merging is still a decision." \
+              -m "Demo-Expiry: revoke"
+            git push -q --force-with-lease origin "$branch"
+
+            {
+              printf '## Expired exemption\n\n'
+              printf '`%s` was granted with an expiry of **%s**, which passed **%s day(s) ago**' \
+                "$name" "$expires" "$overdue"
+              [ -z "$AS_OF" ] || printf ' (evaluated as of `%s`)' "$AS_OF"
+              printf '.\n\n'
+              [ -z "$request" ] || printf 'Original request: %s\n\n' "$request"
+              printf 'Merging this takes it out of `kustomization.yaml`. Argo CD prunes the\n'
+              printf '`PolicyException` within a few minutes and the workload is held to the full\n'
+              printf 'policy set again at its next admission.\n\n'
+              printf '### If the workload still needs it\n\n'
+              printf 'Close this pull request and file a fresh request, so the renewal carries its own\n'
+              printf 'justification and its own date rather than inheriting an expired one. An\n'
+              printf 'exemption nobody can currently justify is exactly what an expiry date is for.\n\n'
+              printf 'The manifest stays in `requests/` either way - a withdrawn exemption is part of\n'
+              printf 'the record.\n'
+            } > pr-body.md
+
+            url=$(gh pr create \
+              --base "$base" --head "$branch" \
+              --title "Revoke expired exception ${name}" \
+              --body-file pr-body.md)
+            echo "opened ${url}"
+
+            # Tell the requester where their exemption went.
+            case "$request" in
+              https://*/issues/*)
+                issue="${request##*/}"
+                {
+                  printf 'The exemption granted from this request expired on %s. ' "$expires"
+                  printf 'A revocation pull request is open for review: %s\n\n' "$url"
+                  printf 'If it is still needed, file a fresh request rather than extending this one.\n'
+                } > issue-comment.md
+                gh issue comment "$issue" --body-file issue-comment.md || true
+                ;;
+            esac
+          done
+
+      - name: Warn about exemptions expiring soon
+        if: steps.find.outputs.soon != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A heads-up while there is still time to renew deliberately, rather than
+          # a surprise revocation PR a week later. Only possible where the exemption
+          # came from a request we can comment on.
+          grep '^soon' findings.tsv | while IFS=$'\t' read -r _ name expires remaining request; do
+            case "$request" in
+              https://*/issues/*)
+                issue="${request##*/}"
+                marker="expires on ${expires}"
+                if gh issue view "$issue" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+                  echo "already warned on #${issue}"
+                  continue
+                fi
+                {
+                  printf 'Heads-up: the exemption from this request %s, in %s day(s).\n\n' \
+                    "$marker" "$remaining"
+                  printf 'If the workload still needs it, file a fresh request now. Otherwise a '
+                  printf 'revocation pull request will be opened for review once the date passes.\n'
+                } > soon-comment.md
+                gh issue comment "$issue" --body-file soon-comment.md || true
+                echo "warned #${issue} about ${name}"
+                ;;
+              *) echo "no request link for ${name}; nobody to warn" ;;
+            esac
+          done
